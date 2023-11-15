@@ -12,6 +12,9 @@ router.addDefaultHandler(async ({ crawler, request, log, json }) => {
 
   const data = json as Composer_dto;
 
+  if (!data.layout) throw new Error("Не найден layout каталога продавцов");
+  if (!data.widgetStates) throw new Error("Не найдены состояния виджетов");
+
   // Добавляем в обработку следующую страницу
   if (data.nextPage) {
     req_url.searchParams.set("url", data.nextPage);
@@ -21,20 +24,48 @@ router.addDefaultHandler(async ({ crawler, request, log, json }) => {
     });
   }
 
+  const seller_list = data.layout.find((e) => e.component == "sellerList");
+  if (!seller_list) throw new Error("Не найден компонент списка продавцов");
+
   // Получаем id необходимого state'а
-  const seller_list_state_id = data.layout.find(
-    (e) => e.name == "marketing.sellerList"
-  )?.stateId;
-  if (!seller_list_state_id) return;
+  const seller_list_state_id = seller_list.stateId;
+  if (!seller_list_state_id)
+    throw new Error("Не найден id состояния виджета списка продавцов");
 
   const state_str = data.widgetStates[seller_list_state_id];
-  if (!state_str) return;
+  if (!state_str)
+    throw new Error("Не найдено состояние виджета списка продавцов");
 
   // Парсим state
-  const state = JSON.parse(state_str);
+  let state;
+  try {
+    state = JSON.parse(state_str);
+  } catch (e) {}
+  if (!state)
+    throw new Error("Не удалось спарсить состояние виджета списка продавцов");
+
+  if (!state.items) throw new Error("В виджете списка продавцов нет элементов");
+  if (state.items.length === 0)
+    throw new Error("В виджете списка продавцов нет элементов");
+
+  const with_deeplink = (state.items = state.items.filter(
+    (e: any) => !!e.deeplink
+  ));
+  const without_deeplink = (state.items = state.items.filter(
+    (e: any) => !e.deeplink
+  ));
+
+  if (without_deeplink.length !== 0)
+    log.warning(
+      `Виджет списка продавцов содержит ${without_deeplink.length} элементов без deeplink`,
+      without_deeplink
+    );
+
+  if (with_deeplink.length == 0)
+    throw new Error("Виджет списка продавцов не содержит элементов с deeplink");
 
   // Добавляем в обработку страницы магазинов
-  const urls = state.items.map((e: any) => {
+  const urls = with_deeplink.map((e: any) => {
     req_url.searchParams.set(
       "url",
       e.deeplink.replace(/^ozon:\//, "").replace("?miniapp", "profile/?miniapp")
@@ -53,18 +84,50 @@ router.addHandler("seller", async ({ request, json, log }) => {
   const req_url = new URL(request.url);
   const data = json as Composer_dto;
 
-  const seller_legal_state_id = data.layout
-    .find((e) => e.name == "marketing.sellerTransparencyProfile")
-    ?.placeholders?.find((e) => e.name == "onAboutShopInfo")
-    ?.widgets.find(
-      (e) => e.name == "marketing.sellerLegalInformation"
-    )?.stateId;
-  if (!seller_legal_state_id) return;
+  if (!data.layout) throw new Error("Не найден layout профиля продавца");
+  if (!data.widgetStates) throw new Error("Не найдены состояния виджетов");
+
+  const seller_transparency_profile = data.layout.find(
+    (e) => e.component == "sellerTransparencyProfile"
+  );
+
+  if (!seller_transparency_profile)
+    throw new Error("Не найдена информация о профиле продавца");
+  if (!seller_transparency_profile.placeholders)
+    throw new Error("Не найдена информация о плейсхолдерах профиля продавца");
+
+  const on_about_shop_info = seller_transparency_profile.placeholders.find(
+    (e) => e.name == "onAboutShopInfo"
+  );
+  if (!on_about_shop_info)
+    throw new Error("Не найден плейсхолдер с блоком о магазине");
+
+  const seller_legal_information = on_about_shop_info.widgets.find(
+    (e) => e.name == "marketing.sellerLegalInformation"
+  );
+  if (!seller_legal_information)
+    throw new Error(
+      "Не найден плейсхолдер с блоком о юридической информации магазина"
+    );
+
+  const seller_legal_state_id = seller_legal_information.stateId;
+  if (!seller_legal_state_id)
+    throw new Error("Не найден id виджета с юридической информацией магазина");
 
   const seller_legal_state_str = data.widgetStates[seller_legal_state_id];
-  if (!seller_legal_state_str) return;
+  if (!seller_legal_state_str)
+    throw new Error(
+      "Не найдено состояние блока с юридической информацией магазина"
+    );
 
-  const seller_legal_state = JSON.parse(seller_legal_state_str);
+  let seller_legal_state;
+  try {
+    seller_legal_state = JSON.parse(seller_legal_state_str);
+  } catch (e) {}
+  if (!seller_legal_state)
+    throw new Error(
+      "Не получается спарсить состояние виджета с юридической информацией магазина"
+    );
 
   const legal_info_array = seller_legal_state.body[1].textAtom.text
     .split(/<br>/g)
@@ -84,6 +147,8 @@ router.addHandler("seller", async ({ request, json, log }) => {
     address,
     ogrn,
   };
+
+  log.info(`Спарсили информацию о ${name}`);
 
   const seller_url_part = req_url.searchParams.get("url");
   let seller_url;

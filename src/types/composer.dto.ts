@@ -1,8 +1,8 @@
 import { Component_dto } from "./component.dto";
 
 export type Composer_dto = {
-  layout: Array<Component_dto>;
-  widgetStates: Record<string, string>;
+  layout?: Array<Component_dto>;
+  widgetStates?: Record<string, string>;
   browser?: {
     ip: string;
     platform: "mobile" | "desktop";
